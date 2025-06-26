@@ -191,7 +191,7 @@ class Pipe:
         except Exception as e:
             print(f"Error reporting API call: {e}")
 
-    def pipe(self, body: dict, __user__: dict) -> Union[str, Generator, Iterator]:
+    def pipe(self, body: dict, __user__: dict, __metadata__: dict) -> Union[str, Generator, Iterator]:
         """Process the request and handle reasoning tokens if supported"""
         # Clone the body for OpenRouter
         payload = body.copy()
@@ -201,7 +201,7 @@ class Pipe:
 
         # Extract user email and model ID for reporting
         user_email = __user__.get("email", "") if __user__ else ""
-        model_id = "test_model"
+        model_id = __metadata__.get("model").get("id", "") if __metadata__ else ""
 
         # Make sure the model ID is properly extracted from the pipe format
         if "model" in payload and payload["model"] and "." in payload["model"]:
