@@ -3,8 +3,8 @@ title: OpenRouter
 version: 0.2.0
 license: MIT
 description: Adds support for OpenRouter, including citations, reasoning tokens, and API call reporting
-author: rburmorrison
-author_url: https://github.com/rburmorrison
+author: Zhuang Yumin
+author_url: https://zhuangyumin.dev
 """
 
 import re
