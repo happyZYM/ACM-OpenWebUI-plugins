@@ -119,6 +119,7 @@ class Pipe:
     def _fetch_generation_details(self, generation_id: str) -> dict:
         """Fetch generation details from OpenRouter API"""
         try:
+            time.sleep(0.5)
             cnt = 0
             max_allowed = 10
             while cnt < max_allowed:
