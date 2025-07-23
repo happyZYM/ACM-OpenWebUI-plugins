@@ -117,48 +117,17 @@ class Pipe:
             print(f"Error fetching models: {e}")
             return [{"id": "error", "name": f"Error: {str(e)}"}]
 
-    def _fetch_generation_details(self, generation_id: str) -> dict:
-        """Fetch generation details from OpenRouter API"""
-        try:
-            time.sleep(0.5)
-            cnt = 0
-            max_allowed = 10
-            while cnt < max_allowed:
-                cnt += 1
-                headers = {"Authorization": f"Bearer {self.valves.OPENROUTER_API_KEY}"}
-                response = requests.get(
-                    "https://openrouter.ai/api/v1/generation",
-                    headers=headers,
-                    params={"id": generation_id},
-                    timeout=30
-                )
-                
-                if response.status_code == 200:
-                    return response.json()
-                elif response.status_code == 404:
-                    print(f"Generation not found, retrying... ({cnt}/{max_allowed})")
-                    time.sleep(1)
-                    continue
-                else:
-                    print(f"Error fetching generation details: {response.status_code}")
-                    return {}
-        except Exception as e:
-            print(f"Error fetching generation details: {e}")
-            return {}
-
-    async def _report_api_call(self, generation_data: dict, user_email: str, model_id: str, __event_emitter__: Callable[[Any], Awaitable[None]]):
-        """Report API call to upstream reporting service"""
+    async def _report_api_call_direct(self, usage_info: dict, user_email: str, model_id: str, __event_emitter__: Callable[[Any], Awaitable[None]]):
+        """Report API call to upstream reporting service using direct usage information"""
         if not self.valves.REPORT_API_URL or not self.valves.REPORT_API_KEY:
             return
         
         try:
-            data = generation_data.get("data", {})
-            
-            # Extract required fields for reporting
+            # Extract required fields for reporting from usage info
             timestamp = int(time.time())
-            input_tokens = data.get("tokens_prompt", 0)
-            output_tokens = data.get("tokens_completion", 0)
-            cost_usd = data.get("total_cost", 0.0)
+            input_tokens = usage_info.get("prompt_tokens", 0)
+            output_tokens = usage_info.get("completion_tokens", 0)
+            cost_usd = usage_info.get("cost", 0.0)
             
             # Prepare API call record
             api_call_record = {
@@ -224,6 +193,9 @@ class Pipe:
         # Add include_reasoning parameter if enabled
         if self.valves.INCLUDE_REASONING:
             payload["include_reasoning"] = True
+        
+        # Add usage tracking to get token and cost information directly
+        payload["usage"] = {"include": True}
 
         # Set up headers
         headers = {
@@ -290,19 +262,18 @@ class Pipe:
             res = response.json()
             print(f"OpenRouter response keys: {list(res.keys())}")
 
-            # Extract generation ID for reporting
-            generation_id = res.get("id", "")
-            if generation_id and user_email and model_id:
-                try:
-                    generation_data = self._fetch_generation_details(generation_id)
-                    if generation_data:
-                        await self._report_api_call(generation_data, user_email, model_id, __event_emitter__)
-                except Exception as e:
-                    print(f"Error reporting API call: {e}")
-                    return f"Error: {e}"
-            else:
-                print(f"No generation ID found for reporting")
-                return f"Error: No generation ID found for reporting" 
+            # Extract usage information directly from response for reporting
+            if user_email and model_id:
+                usage_info = res.get("usage", {})
+                if usage_info:
+                    try:
+                        await self._report_api_call_direct(usage_info, user_email, model_id, __event_emitter__)
+                    except Exception as e:
+                        print(f"Error reporting API call: {e}")
+                        return f"Error: {e}"
+                else:
+                    print(f"No usage information found in response")
+                    return f"Error: No usage information found in response" 
 
             # Check if we have choices in the response
             if not res.get("choices") or len(res["choices"]) == 0:
@@ -354,7 +325,8 @@ class Pipe:
             # State tracking
             in_reasoning_state = False  # True if we've output the opening <think> tag
             latest_citations = []  # The latest citations list
-            generation_id = ""  # Track generation ID for reporting
+            done_received = False  # Track if we've received [DONE]
+            usage_info = None  # Store usage information for reporting
 
             # Process the response stream
             for line in response.iter_lines():
@@ -365,34 +337,31 @@ class Pipe:
                 if not line_text.startswith("data: "):
                     continue
                 elif line_text == "data: [DONE]":
+                    done_received = True
                     # Handle citations at the end
                     if latest_citations:
                         citation_list = [f"1. {l}" for l in latest_citations]
                         citation_list_str = "\n".join(citation_list)
                         yield f"\n\n---\nCitations:\n{citation_list_str}"
-                    
-                    # Handle reporting at the end
-                    if generation_id and user_email and model_id:
-                        try:
-                            generation_data = self._fetch_generation_details(generation_id)
-                            if generation_data:
-                                await self._report_api_call(generation_data, user_email, model_id, __event_emitter__)
-                        except Exception as e:
-                            print(f"Error reporting API call: {e}")
-                            yield f"Error: {e}"
-                        yield "" ## trick
-                    else:
-                        print(f"No generation ID found for reporting")
-                        yield f"Error: No generation ID found for reporting"
                     continue
 
                 try:
                     chunk = json.loads(line_text[6:])
 
-                    # Extract generation ID from any chunk that has it
-                    if not generation_id and "id" in chunk:
-                        generation_id = chunk["id"]
-                        print(f"Extracted generation ID for reporting: {generation_id}")
+                    # Check for usage information (appears after [DONE])
+                    if "usage" in chunk:
+                        usage_info = chunk["usage"]
+                        print(f"Extracted usage info: {usage_info}")
+                        
+                        # Handle reporting with usage information
+                        if user_email and model_id and usage_info:
+                            try:
+                                await self._report_api_call_direct(usage_info, user_email, model_id, __event_emitter__)
+                            except Exception as e:
+                                print(f"Error reporting API call: {e}")
+                                yield f"Error: {e}"
+                            yield ""  # trick to ensure proper completion
+                        continue
 
                     if "choices" in chunk and chunk["choices"]:
                         choice = chunk["choices"][0]
