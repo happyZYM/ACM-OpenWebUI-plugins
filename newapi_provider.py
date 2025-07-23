@@ -91,17 +91,14 @@ class Pipe:
             }
         }
 
-    def _calculate_tokens_and_cost(self, messages: list, response_text: str, model_id: str) -> dict:
+    def _calculate_tokens_and_cost(self, messages: list, response_text: str, model_name: str) -> dict:
         """Calculate token count and cost using tiktoken"""
         try:
             # Get appropriate encoding for the model
-            if "gpt-4" in model_id.lower():
-                encoding = tiktoken.encoding_for_model("gpt-4")
-            elif "gpt-3.5" in model_id.lower():
-                encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
-            else:
-                # Default to gpt-4 encoding for other models
-                encoding = tiktoken.encoding_for_model("gpt-4")
+            try:
+                encoding = tiktoken.encoding_for_model(model_name)
+            except KeyError:
+                encoding = tiktoken.encoding_for_model("gpt-4o")
             
             # Calculate input tokens from messages
             input_tokens = 0
@@ -121,7 +118,7 @@ class Pipe:
             output_tokens = len(encoding.encode(response_text)) if response_text else 0
             
             # Get pricing for the model
-            pricing = self.pricing_dict.get(model_id, {"input": 2.5, "output": 10})  # Default to gpt-4o pricing
+            pricing = self.pricing_dict.get(model_name)
             
             # Calculate cost (pricing is per 1M tokens)
             input_cost = (input_tokens / 1_000_000) * pricing["input"]
@@ -287,12 +284,14 @@ class Pipe:
             headers["X-Title"] = "Open WebUI via Pipe"
 
         url = f"{self.valves.NEWAPI_BASE_URL}/chat/completions"
+        model_name = payload['model']
+        print(f"model name in body is {model_name}")
 
         try:
             if body.get("stream", False):
-                return self.stream_response(url, headers, payload, user_email, model_id, __event_emitter__)
+                return self.stream_response(url, headers, payload, user_email, model_id, __event_emitter__, model_name)
             else:
-                return await self.non_stream_response(url, headers, payload, user_email, model_id, __event_emitter__)
+                return await self.non_stream_response(url, headers, payload, user_email, model_id, __event_emitter__, model_name)
         except requests.exceptions.RequestException as e:
             print(f"Request failed: {e}")
             return f"Error: Request failed: {e}"
@@ -300,7 +299,7 @@ class Pipe:
             print(f"Error in pipe method: {e}")
             return f"Error: {e}"
 
-    async def non_stream_response(self, url, headers, payload, user_email, model_id, __event_emitter__: Callable[[Any], Awaitable[None]]):
+    async def non_stream_response(self, url, headers, payload, user_email, model_id, __event_emitter__: Callable[[Any], Awaitable[None]], model_name: str):
         """Handle non-streaming responses and wrap reasoning in <think> tags if present"""
         try:
             print(
@@ -361,7 +360,7 @@ class Pipe:
             # Calculate usage information using tiktoken
             if user_email and model_id:
                 messages = payload.get("messages", [])
-                usage_info = self._calculate_tokens_and_cost(messages, final_response, model_id)
+                usage_info = self._calculate_tokens_and_cost(messages, final_response, model_name)
                 
                 try:
                     await self._report_api_call_direct(usage_info, user_email, model_id, __event_emitter__)
@@ -374,7 +373,7 @@ class Pipe:
             print(f"Error in non_stream_response: {e}")
             return f"Error: {e}"
 
-    async def stream_response(self, url, headers, payload, user_email, model_id, __event_emitter__: Callable[[Any], Awaitable[None]]):
+    async def stream_response(self, url, headers, payload, user_email, model_id, __event_emitter__: Callable[[Any], Awaitable[None]], model_name: str):
         """Stream reasoning tokens in real-time with proper tag management"""
         try:
             response = requests.post(
@@ -424,7 +423,7 @@ class Pipe:
                         elif accumulated_content:
                             final_response = accumulated_content
                         
-                        usage_info = self._calculate_tokens_and_cost(messages, final_response, model_id)
+                        usage_info = self._calculate_tokens_and_cost(messages, final_response, model_name)
                         
                         try:
                             await self._report_api_call_direct(usage_info, user_email, model_id, __event_emitter__)
