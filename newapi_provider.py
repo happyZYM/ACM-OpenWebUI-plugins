@@ -88,6 +88,14 @@ class Pipe:
             "gpt-4.1": {
                 "input": 2,
                 "output": 8
+            },
+            "o3": {
+                "input": 2,
+                "output": 8
+            },
+            "o4-mini": {
+                "input": 1.1,
+                "output": 4.4
             }
         }
 
