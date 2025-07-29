@@ -11,9 +11,8 @@ import re
 import aiohttp
 import json
 import time
-from typing import List, Union, Generator, Iterator, Optional, Callable, Any, Awaitable, AsyncGenerator
+from typing import List, Union, Callable, Any, Awaitable, AsyncGenerator
 from pydantic import BaseModel, Field
-import asyncio
 
 
 def _insert_citations(text: str, citations: list[str]) -> str:
@@ -82,12 +81,12 @@ class Pipe:
 
         try:
             headers = {"Authorization": f"Bearer {self.valves.OPENROUTER_API_KEY}"}
-            
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(
-                    "https://openrouter.ai/api/v1/models", 
+                    "https://openrouter.ai/api/v1/models",
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=30)
+                    timeout=aiohttp.ClientTimeout(total=30),
                 ) as response:
                     if response.status != 200:
                         return [
@@ -120,18 +119,24 @@ class Pipe:
             print(f"Error fetching models: {e}")
             return [{"id": "error", "name": f"Error: {str(e)}"}]
 
-    async def _report_api_call_direct(self, usage_info: dict, user_email: str, model_id: str, __event_emitter__: Callable[[Any], Awaitable[None]]):
+    async def _report_api_call_direct(
+        self,
+        usage_info: dict,
+        user_email: str,
+        model_id: str,
+        __event_emitter__: Callable[[Any], Awaitable[None]],
+    ):
         """Report API call to upstream reporting service using direct usage information asynchronously"""
         if not self.valves.REPORT_API_URL or not self.valves.REPORT_API_KEY:
             return
-        
+
         try:
             # Extract required fields for reporting from usage info
             timestamp = int(time.time())
             input_tokens = usage_info.get("prompt_tokens", 0)
             output_tokens = usage_info.get("completion_tokens", 0)
             cost_usd = usage_info.get("cost", 0.0)
-            
+
             # Prepare API call record
             api_call_record = {
                 "timestamp": timestamp,
@@ -139,29 +144,29 @@ class Pipe:
                 "user_email": user_email,
                 "input_tokens": input_tokens,
                 "output_tokens": output_tokens,
-                "cost_usd": cost_usd
+                "cost_usd": cost_usd,
             }
-            
+
             # Send to reporting API asynchronously
             headers = {
                 "Authorization": f"Bearer {self.valves.REPORT_API_KEY}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
             }
-            
+
             report_url = f"{self.valves.REPORT_API_URL.rstrip('/')}/api/record_api_call"
-            
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     report_url,
                     headers=headers,
                     json=api_call_record,
-                    timeout=aiohttp.ClientTimeout(total=30)
+                    timeout=aiohttp.ClientTimeout(total=30),
                 ) as response:
                     if response.status == 200:
                         print(f"Successfully reported API call for user {user_email}")
                     else:
                         print(f"Failed to report API call: {response.status}")
-            
+
             info = f"input: {input_tokens} | output: {output_tokens} | cost: {cost_usd:.6f}"
             await __event_emitter__(
                 {
@@ -175,7 +180,13 @@ class Pipe:
         except Exception as e:
             print(f"Error reporting API call: {e}")
 
-    async def pipe(self, body: dict, __user__: dict, __metadata__: dict, __event_emitter__: Callable[[Any], Awaitable[None]]) -> Union[str, AsyncGenerator]:
+    async def pipe(
+        self,
+        body: dict,
+        __user__: dict,
+        __metadata__: dict,
+        __event_emitter__: Callable[[Any], Awaitable[None]],
+    ) -> Union[str, AsyncGenerator]:
         """Process the request and handle reasoning tokens if supported"""
         # Clone the body for OpenRouter
         payload = body.copy()
@@ -196,7 +207,7 @@ class Pipe:
         # Add include_reasoning parameter if enabled
         if self.valves.INCLUDE_REASONING:
             payload["include_reasoning"] = True
-        
+
         # Add usage tracking to get token and cost information directly
         payload["usage"] = {"include": True}
 
@@ -223,9 +234,13 @@ class Pipe:
 
         try:
             if body.get("stream", False):
-                return self.stream_response(url, headers, payload, user_email, model_id, __event_emitter__)
+                return self.stream_response(
+                    url, headers, payload, user_email, model_id, __event_emitter__
+                )
             else:
-                return await self.non_stream_response(url, headers, payload, user_email, model_id, __event_emitter__)
+                return await self.non_stream_response(
+                    url, headers, payload, user_email, model_id, __event_emitter__
+                )
         except aiohttp.ClientError as e:
             print(f"Request failed: {e}")
             return f"Error: Request failed: {e}"
@@ -233,19 +248,27 @@ class Pipe:
             print(f"Error in pipe method: {e}")
             return f"Error: {e}"
 
-    async def non_stream_response(self, url, headers, payload, user_email, model_id, __event_emitter__: Callable[[Any], Awaitable[None]]):
+    async def non_stream_response(
+        self,
+        url,
+        headers,
+        payload,
+        user_email,
+        model_id,
+        __event_emitter__: Callable[[Any], Awaitable[None]],
+    ):
         """Handle non-streaming responses and wrap reasoning in <think> tags if present"""
         try:
             print(
                 f"Sending non-streaming request to OpenRouter: {json.dumps(payload)[:200]}..."
             )
-            
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    url, 
-                    headers=headers, 
-                    json=payload, 
-                    timeout=aiohttp.ClientTimeout(total=90)
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=90),
                 ) as response:
                     if response.status != 200:
                         error_message = f"HTTP Error {response.status}"
@@ -257,7 +280,9 @@ class Pipe:
                                     isinstance(error_data["error"], dict)
                                     and "message" in error_data["error"]
                                 ):
-                                    error_message += f": {error_data['error']['message']}"
+                                    error_message += (
+                                        f": {error_data['error']['message']}"
+                                    )
                                 else:
                                     error_message += f": {error_data['error']}"
                         except Exception as e:
@@ -277,13 +302,15 @@ class Pipe:
                 usage_info = res.get("usage", {})
                 if usage_info:
                     try:
-                        await self._report_api_call_direct(usage_info, user_email, model_id, __event_emitter__)
+                        await self._report_api_call_direct(
+                            usage_info, user_email, model_id, __event_emitter__
+                        )
                     except Exception as e:
                         print(f"Error reporting API call: {e}")
                         return f"Error: {e}"
                 else:
-                    print(f"No usage information found in response")
-                    return f"Error: No usage information found in response" 
+                    print("No usage information found in response")
+                    return "Error: No usage information found in response"
 
             # Check if we have choices in the response
             if not res.get("choices") or len(res["choices"]) == 0:
@@ -299,8 +326,12 @@ class Pipe:
             content = message.get("content", "")
             reasoning = message.get("reasoning", "")
 
-            print(f"Found reasoning: {bool(reasoning)} ({len(reasoning) if reasoning is not None else 0} chars)")
-            print(f"Found content: {bool(content)} ({len(content) if content is not None else 0} chars)")
+            print(
+                f"Found reasoning: {bool(reasoning)} ({len(reasoning) if reasoning is not None else 0} chars)"
+            )
+            print(
+                f"Found content: {bool(content)} ({len(content) if content is not None else 0} chars)"
+            )
 
             # If we have both reasoning and content
             if reasoning and content:
@@ -314,15 +345,23 @@ class Pipe:
             print(f"Error in non_stream_response: {e}")
             return f"Error: {e}"
 
-    async def stream_response(self, url, headers, payload, user_email, model_id, __event_emitter__: Callable[[Any], Awaitable[None]]):
+    async def stream_response(
+        self,
+        url,
+        headers,
+        payload,
+        user_email,
+        model_id,
+        __event_emitter__: Callable[[Any], Awaitable[None]],
+    ):
         """Stream reasoning tokens in real-time with proper tag management"""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
-                    url, 
-                    headers=headers, 
+                    url,
+                    headers=headers,
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=90)
+                    timeout=aiohttp.ClientTimeout(total=90),
                 ) as response:
                     if response.status != 200:
                         error_message = f"HTTP Error {response.status}"
@@ -331,14 +370,15 @@ class Pipe:
                             error_message += (
                                 f": {error_data.get('error', {}).get('message', '')}"
                             )
-                        except:
+                        except Exception:
                             pass
                         raise Exception(error_message)
 
                     # State tracking
-                    in_reasoning_state = False  # True if we've output the opening <think> tag
+                    in_reasoning_state = (
+                        False  # True if we've output the opening <think> tag
+                    )
                     latest_citations = []  # The latest citations list
-                    done_received = False  # Track if we've received [DONE]
                     usage_info = None  # Store usage information for reporting
 
                     # Process the response stream asynchronously
@@ -347,19 +387,21 @@ class Pipe:
                             continue
 
                         line_text = line_bytes.decode("utf-8").strip()
-                        
+
                         # Handle multiple lines in a single chunk
-                        for line in line_text.split('\n'):
+                        for line in line_text.split("\n"):
                             if not line.strip():
                                 continue
-                                
+
                             if not line.startswith("data: "):
                                 continue
                             elif line == "data: [DONE]":
-                                done_received = True
                                 # Handle citations at the end
                                 if latest_citations:
-                                    citation_list = [f"1. {l}" for l in latest_citations]
+                                    citation_list = [
+                                        f"1. {citation}"
+                                        for citation in latest_citations
+                                    ]
                                     citation_list_str = "\n".join(citation_list)
                                     yield f"\n\n---\nCitations:\n{citation_list_str}"
                                 continue
@@ -371,11 +413,16 @@ class Pipe:
                                 if "usage" in chunk:
                                     usage_info = chunk["usage"]
                                     print(f"Extracted usage info: {usage_info}")
-                                    
+
                                     # Handle reporting with usage information
                                     if user_email and model_id and usage_info:
                                         try:
-                                            await self._report_api_call_direct(usage_info, user_email, model_id, __event_emitter__)
+                                            await self._report_api_call_direct(
+                                                usage_info,
+                                                user_email,
+                                                model_id,
+                                                __event_emitter__,
+                                            )
                                         except Exception as e:
                                             print(f"Error reporting API call: {e}")
                                             yield f"Error: {e}"
@@ -392,16 +439,28 @@ class Pipe:
 
                                     # Check for reasoning tokens
                                     reasoning_text = None
-                                    if "delta" in choice and "reasoning" in choice["delta"]:
+                                    if (
+                                        "delta" in choice
+                                        and "reasoning" in choice["delta"]
+                                    ):
                                         reasoning_text = choice["delta"]["reasoning"]
-                                    elif "message" in choice and "reasoning" in choice["message"]:
+                                    elif (
+                                        "message" in choice
+                                        and "reasoning" in choice["message"]
+                                    ):
                                         reasoning_text = choice["message"]["reasoning"]
 
                                     # Check for content tokens
                                     content_text = None
-                                    if "delta" in choice and "content" in choice["delta"]:
+                                    if (
+                                        "delta" in choice
+                                        and "content" in choice["delta"]
+                                    ):
                                         content_text = choice["delta"]["content"]
-                                    elif "message" in choice and "content" in choice["message"]:
+                                    elif (
+                                        "message" in choice
+                                        and "content" in choice["message"]
+                                    ):
                                         content_text = choice["message"]["content"]
 
                                     # Handle reasoning tokens
@@ -412,7 +471,9 @@ class Pipe:
                                             in_reasoning_state = True
 
                                         # Output the reasoning token
-                                        yield _insert_citations(reasoning_text, citations)
+                                        yield _insert_citations(
+                                            reasoning_text, citations
+                                        )
 
                                     # Handle content tokens
                                     if content_text:
@@ -423,7 +484,9 @@ class Pipe:
 
                                         # Output the content
                                         if content_text:
-                                            yield _insert_citations(content_text, citations)
+                                            yield _insert_citations(
+                                                content_text, citations
+                                            )
 
                             except Exception as e:
                                 print(f"Error processing chunk: {e}")

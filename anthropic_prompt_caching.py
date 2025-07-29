@@ -1,5 +1,6 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional
+
 
 class Filter:
     class Valves(BaseModel):
@@ -7,7 +8,7 @@ class Filter:
 
     def __init__(self):
         self.valves = self.Valves()
-        self.toggle = True # IMPORTANT: This creates a switch UI in Open WebUI
+        self.toggle = True  # IMPORTANT: This creates a switch UI in Open WebUI
         pass
 
     async def inlet(
@@ -27,7 +28,13 @@ class Filter:
         last_message_item = body["messages"][-1]
         # 如果 content 是字符串
         if isinstance(last_message_item["content"], str):
-            last_message_item['content'] = [{"type": "text", "text": last_message_item["content"], "cache_control": {"type": "ephemeral"}}]
+            last_message_item["content"] = [
+                {
+                    "type": "text",
+                    "text": last_message_item["content"],
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
         else:
             print("Prompt Caching Failed: unsupported content type")
         return body
