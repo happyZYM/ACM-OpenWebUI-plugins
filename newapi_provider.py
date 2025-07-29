@@ -96,6 +96,10 @@ class Pipe:
             "o4-mini": {
                 "input": 1.1,
                 "output": 4.4
+            },
+            "claude-sonnet-4-20250514": {
+                "input": 3,
+                "output": 15
             }
         }
 
